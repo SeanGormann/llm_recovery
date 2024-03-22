@@ -1,6 +1,6 @@
 import torch
 import bitsandbytes
-#import accelerate
+import accelerate
 import transformers
 import optimum
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer, TrainingArguments
@@ -24,7 +24,7 @@ tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", trust_remote_code=T
 
 # load the training dataset
 #dataset = load_dataset("json", data_files={'train': dataset_file})
-dataset = pd.read_csv("/data_generation/dpo_dataset_v1.csv")
+dataset = pd.read_csv("/llm_recovery/data_generation/dpo_dataset_v1.csv")
 #dataset = dataset['train'].shuffle(seed=42)
 
 bnb_config = BitsAndBytesConfig(
@@ -37,15 +37,12 @@ device_map = "auto"
 
 base_model = AutoModelForCausalLM.from_pretrained(
     "microsoft/phi-2",
+    #"mistralai/Mistral-7B-Instruct-v0.1",
     quantization_config=bnb_config,
     device_map=device_map,
     trust_remote_code=True,
 )
 base_model.config.use_cache = False
-
-
-
-dataset = dataset['train'].shuffle(seed=42)
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
@@ -94,15 +91,11 @@ def get_prompt(example):
 
     return example
 
-
-
-
-
+print("Mapping Dataset..")
 # Map the function over the dataset
 dataset = dataset.map(get_prompt)
 dataset = dataset.rename_column("chosen_score", "score_chosen")
 dataset = dataset.rename_column("rejected_score", "score_rejected")
-
 
 
 
@@ -171,11 +164,62 @@ training_args = TrainingArguments(
     optim="paged_adamw_32bit",
 )
 
+if torch.cuda.is_available():
+    generator = torch.Generator(device='cuda')
+else:
+    generator = torch.Generator(device='cpu')
+# Use this generator for operations that require it
+from accelerate import Accelerator, DataLoaderConfiguration
+
+dataloader_config = DataLoaderConfiguration(dispatch_batches=None, split_batches=False, even_batches=True, use_seedable_sampler=True)
+accelerator = Accelerator(dataloader_config=dataloader_config)
+
+print(torch.cuda.device_count())
+# Check the device of the model's first parameter
+device1 = next(base_model.parameters()).device
+print(f"The model is on device: {device1}")
+print(f"Accelerator is using device: {accelerator.device}")
+
+from datasets import load_dataset
+
+dataset_file = "dpo_dataset.json"
+"""
+
+"""
+ # Load the dataset
+#dataset = load_dataset("json", data_files="dpo_dataset.json", field="rows")
+#dataset = load_dataset("Anthropic/hh-rlhf")
+dataset = load_dataset("argilla/dpo-mix-7k")
+print(dataset)
+
+def construct_prompt(example):
+    # Extract the question and initial answer from the 'chosen' field (assuming it's similar for 'rejected')
+    question = example['chosen'][0]['content']
+    initial_answer = example['chosen'][1]['content']
+    
+    # Extract the completions from both 'chosen' and 'rejected' fields
+    chosen_completion = example['chosen'][1]['content']
+    rejected_completion = example['rejected'][1]['content']
+    
+    # Construct the prompt
+    prompt = f"Question and Initial Answer:\n{question}\n\nChosen Completion:\n{chosen_completion}\n\nRejected Completion:\n{rejected_completion}\n\n"
+    prompt += "Based on the initial answer, which completion is more accurate and relevant? Choose 'Chosen' or 'Rejected'."
+    
+    example['prompt'] = prompt
+    return example
+
+
+dataset = dataset.map(construct_prompt)
+print(dataset)
+
+dataset = load_dataset("unalignment/toxic-dpo-v0.2")
+print(dataset)
+
 trainer = DPOTrainer(
-    base_model, # model base_model
+    model, # model base_model
     ref_model=None,
     args=training_args,
-    train_dataset=dataset,
+    train_dataset=dataset["train"], # test_dataset dataset
     tokenizer=tokenizer,
     peft_config=lora_config,
     beta=0.1,
@@ -183,6 +227,13 @@ trainer = DPOTrainer(
     max_length=1536,
 )
 
+print(trainer.accelerator.device)
+print(tokenizer.special_tokens_map)
+print(dir(dataset))
+print(dir(trainer))
+
+
+print("Starting trainer...")
 trainer.train()
 
 # todo: during training getting these warning:
