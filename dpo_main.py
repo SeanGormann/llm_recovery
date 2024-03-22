@@ -24,7 +24,7 @@ tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", trust_remote_code=T
 
 # load the training dataset
 #dataset = load_dataset("json", data_files={'train': dataset_file})
-dataset = pd.read_csv("/llm_recovery/data_generation/dpo_dataset_v1.csv")
+#dataset = pd.read_csv("/llm_recovery/data_generation/dpo_dataset_v1.csv")
 #dataset = dataset['train'].shuffle(seed=42)
 
 bnb_config = BitsAndBytesConfig(
@@ -46,12 +46,11 @@ base_model.config.use_cache = False
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
-output_dir = "/"
+output_dir = "/llm_recovery/"
 
-
+"""
 # Assuming `df` is your DataFrame
 dataset.to_json("your_dataset.json", orient="records", lines=True)
-
 # Load the training dataset
 dataset_file = "your_dataset.json"
 dataset = load_dataset("json", data_files={'train': dataset_file})
@@ -120,7 +119,7 @@ actual_rewrite_prompt = example['chosen_prompt']
 print("Generated Prompt:", text)
 print("Actual Rewrite Prompt:", actual_rewrite_prompt)
 
-
+"""
 
 dataset = load_dataset("unalignment/toxic-dpo-v0.2")
 print(dataset)
@@ -152,7 +151,7 @@ dataset.map(preprocess_function, batched=True)
 lora_dropout=0.05
 lora_alpha=16
 lora_r=16
-learning_rate=5e-5
+learning_rate=5e-4 # 5e-4
 batch_size = 4
 
 def create_peft_config(model):
@@ -250,3 +249,27 @@ trainer.train()
 
 output_dir = os.path.join(output_dir, "final_checkpoint")
 trainer.model.save_pretrained(output_dir)
+
+
+##Testing
+# Define the system message
+example = dataset["train"][0]
+input_text = example["prompt"]
+
+# Tokenize input text, ensuring to generate an attention mask this time
+inputs = tokenizer(input_text, return_tensors="pt", max_length=2000, truncation=True, padding=True)
+
+# For open-ended generation, setting pad_token_id explicitly if your model does not have one set
+if model.config.pad_token_id is None:
+    model.config.pad_token_id = base_model.config.eos_token_id
+
+# Generate output using the updated inputs
+outputs = model.generate(**inputs, max_length=2000, pad_token_id=model.config.pad_token_id)
+text = tokenizer.batch_decode(outputs)[0]
+
+# Output the model's generated text and the actual rewrite prompt for comparison
+actual_rewrite_prompt = example['chosen']
+print("Generated Prompt:", text)
+print("Actual Rewrite Prompt:", actual_rewrite_prompt)
+
+
