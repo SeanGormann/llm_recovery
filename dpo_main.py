@@ -17,7 +17,7 @@ import os
 
 
 
-torch.set_default_device("cuda")
+#torch.set_default_device("cuda")
 
 #model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2", torch_dtype="auto", trust_remote_code=True)
 tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", trust_remote_code=True)
@@ -122,6 +122,32 @@ print("Actual Rewrite Prompt:", actual_rewrite_prompt)
 
 
 
+dataset = load_dataset("unalignment/toxic-dpo-v0.2")
+print(dataset)
+
+def preprocess_function(examples):
+    # Tokenize the 'prompt', 'chosen', and 'rejected' fields and truncate them if necessary
+    prompt_encodings = tokenizer(examples['prompt'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
+    chosen_encodings = tokenizer(examples['chosen'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
+    rejected_encodings = tokenizer(examples['rejected'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
+    
+    # Ensure we return a list of texts, not token IDs, after truncation
+    truncated_prompts = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in prompt_encodings.input_ids]
+    truncated_chosens = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in chosen_encodings.input_ids]
+    truncated_rejecteds = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in rejected_encodings.input_ids]
+    
+    # Update the examples with the truncated texts
+    examples['prompt'] = truncated_prompts
+    examples['chosen'] = truncated_chosens
+    examples['rejected'] = truncated_rejecteds
+
+    return examples
+
+# Apply preprocessing to the 'train' split
+dataset.map(preprocess_function, batched=True)
+
+
+
 # from https://github.com/mlabonne/llm-course/blob/main/Fine_tune_a_Mistral_7b_model_with_DPO.ipynb
 lora_dropout=0.05
 lora_alpha=16
@@ -164,27 +190,9 @@ training_args = TrainingArguments(
     optim="paged_adamw_32bit",
 )
 
-if torch.cuda.is_available():
-    generator = torch.Generator(device='cuda')
-else:
-    generator = torch.Generator(device='cpu')
-# Use this generator for operations that require it
-from accelerate import Accelerator, DataLoaderConfiguration
-
-dataloader_config = DataLoaderConfiguration(dispatch_batches=None, split_batches=False, even_batches=True, use_seedable_sampler=True)
-accelerator = Accelerator(dataloader_config=dataloader_config)
-
-print(torch.cuda.device_count())
-# Check the device of the model's first parameter
-device1 = next(base_model.parameters()).device
-print(f"The model is on device: {device1}")
-print(f"Accelerator is using device: {accelerator.device}")
-
 from datasets import load_dataset
 
 dataset_file = "dpo_dataset.json"
-"""
-
 """
  # Load the dataset
 #dataset = load_dataset("json", data_files="dpo_dataset.json", field="rows")
@@ -211,9 +219,7 @@ def construct_prompt(example):
 
 dataset = dataset.map(construct_prompt)
 print(dataset)
-
-dataset = load_dataset("unalignment/toxic-dpo-v0.2")
-print(dataset)
+"""
 
 trainer = DPOTrainer(
     model, # model base_model
@@ -227,10 +233,8 @@ trainer = DPOTrainer(
     max_length=1536,
 )
 
-print(trainer.accelerator.device)
-print(tokenizer.special_tokens_map)
-print(dir(dataset))
-print(dir(trainer))
+
+# Use this generator in your DataLoader, Sampler, or other components that require random operations
 
 
 print("Starting trainer...")
