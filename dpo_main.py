@@ -14,18 +14,23 @@ from trl import DPOTrainer
 import pandas as pd
 from datasets import load_dataset
 import os
+from sentence_transformers import SentenceTransformer, util
+import torch
+from time import time
+#from sklearn.metrics.pairwise import cosine_similarity
+
+total_memory = torch.cuda.get_device_properties(0).total_memory
+free_memory = total_memory - torch.cuda.memory_allocated(0)
+print(f"Total GPU Memory: {total_memory / 1e9} GB, Free Memory: {free_memory / 1e9} GB")
 
 
 
-#torch.set_default_device("cuda")
+#import flash-attention
 
-#model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2", torch_dtype="auto", trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", trust_remote_code=True)
 
-# load the training dataset
-#dataset = load_dataset("json", data_files={'train': dataset_file})
-#dataset = pd.read_csv("/llm_recovery/data_generation/dpo_dataset_v1.csv")
-#dataset = dataset['train'].shuffle(seed=42)
+model_path = "google/gemma-2b-it" # "google/gemma-2b-it" "microsoft/phi-2"
+access_token = "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"
+
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -36,114 +41,123 @@ bnb_config = BitsAndBytesConfig(
 device_map = "auto"
 
 base_model = AutoModelForCausalLM.from_pretrained(
-    "microsoft/phi-2",
-    #"mistralai/Mistral-7B-Instruct-v0.1",
+    model_path,
     quantization_config=bnb_config,
+    attn_implementation="flash_attention_2",
     device_map=device_map,
     trust_remote_code=True,
+    token=access_token
 )
+
 base_model.config.use_cache = False
+
+tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, token=access_token) #microsoft/phi-2
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 output_dir = "/llm_recovery/"
 
-"""
-# Assuming `df` is your DataFrame
-dataset.to_json("your_dataset.json", orient="records", lines=True)
-# Load the training dataset
-dataset_file = "your_dataset.json"
-dataset = load_dataset("json", data_files={'train': dataset_file})
-dataset = dataset['train'].shuffle(seed=42)
-
-def truncate_text(example, max_length=900):
-    # Tokenize the original and rewritten texts to check their length
-    tokens_original = tokenizer.encode(example['original_text'], add_special_tokens=False)
-    tokens_rewritten = tokenizer.encode(example['rewritten_text'], add_special_tokens=False)
-    #print(len(tokens_original), len(tokens_rewritten))
-
-    # Check if the length exceeds max_length and truncate if necessary
-    if len(tokens_original) > max_length:
-        # Decode back to text after truncating
-        example['original_text'] = tokenizer.decode(tokens_original[:max_length], skip_special_tokens=True, clean_up_tokenization_spaces=True)
-
-    if len(tokens_rewritten) > max_length:
-        # Decode back to text after truncating
-        example['rewritten_text'] = tokenizer.decode(tokens_rewritten[:max_length], skip_special_tokens=True, clean_up_tokenization_spaces=True)
-
-    return example
 
 
-def get_prompt(example):
-    # Assuming `tokenizer` and other necessary components are defined elsewhere in your notebook
-    example = truncate_text(example)
-
-    prompt_sample = [
-        {"role": "system", "content": "From the given original and rewritten texts, predict the rewrite prompt used to transform the original text."},
-        {"role": "user", "content": f"Original: {example['original_text']} ----- Rewritten: {example['rewritten_text']} "}
-    ]
-    prompt_for_model = tokenizer.apply_chat_template(prompt_sample, tokenize=False)
-    example['prompt'] = prompt_for_model
-
-    example['chosen'] = example['chosen_prompt'] + tokenizer.eos_token
-    example['rejected'] = example['rejected_prompt'] + tokenizer.eos_token
-
-    return example
-
-print("Mapping Dataset..")
-# Map the function over the dataset
-dataset = dataset.map(get_prompt)
-dataset = dataset.rename_column("chosen_score", "score_chosen")
-dataset = dataset.rename_column("rejected_score", "score_rejected")
-
-
-
-##Testing
-# Define the system message
-example = dataset[0]
-input_text = example["prompt"]
-
-# Tokenize input text, ensuring to generate an attention mask this time
-inputs = tokenizer(input_text, return_tensors="pt", max_length=2000, truncation=True, padding=True)
-
-# For open-ended generation, setting pad_token_id explicitly if your model does not have one set
-if base_model.config.pad_token_id is None:
-    base_model.config.pad_token_id = base_model.config.eos_token_id
-
-# Generate output using the updated inputs
-outputs = base_model.generate(**inputs, max_length=2000, pad_token_id=base_model.config.pad_token_id)
-text = tokenizer.batch_decode(outputs)[0]
-
-# Output the model's generated text and the actual rewrite prompt for comparison
-actual_rewrite_prompt = example['chosen_prompt']
-print("Generated Prompt:", text)
-print("Actual Rewrite Prompt:", actual_rewrite_prompt)
-
-"""
-
-dataset = load_dataset("unalignment/toxic-dpo-v0.2")
+dataset_path = '/llm_recovery/data_generation/dpo_dataset_v1.json'
+dataset = load_dataset('json', data_files=dataset_path)
 print(dataset)
 
-def preprocess_function(examples):
-    # Tokenize the 'prompt', 'chosen', and 'rejected' fields and truncate them if necessary
-    prompt_encodings = tokenizer(examples['prompt'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
-    chosen_encodings = tokenizer(examples['chosen'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
-    rejected_encodings = tokenizer(examples['rejected'], truncation=True, max_length=2048, padding="max_length", return_tensors="pt")
+"""
+def create_custom_prompt(tokenizer, original_text, rewritten_text, max_tokens=512):
+    task_description = "Determine what rewrite prompt was used to convert this text."
+    assistant_message = "Please provide the Original_Text and Rewritten_Text."
     
-    # Ensure we return a list of texts, not token IDs, after truncation
-    truncated_prompts = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in prompt_encodings.input_ids]
-    truncated_chosens = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in chosen_encodings.input_ids]
-    truncated_rejecteds = [tokenizer.decode(enc, skip_special_tokens=True, clean_up_tokenization_spaces=True) for enc in rejected_encodings.input_ids]
+    # Function to truncate text based on token count and note the original length if truncated
+    def truncate_text(text, max_tok):
+        tokens = tokenizer.encode(text, add_special_tokens=True)
+        if len(tokens) > max_tok:
+            truncated_tokens = tokens[:max_tok]
+            truncated_text = tokenizer.decode(truncated_tokens, skip_special_tokens=True)
+            return truncated_text + " ... [Text truncated]", len(tokens)
+        return text, len(tokens)
+
+    truncated_original, original_tokens = truncate_text(original_text, max_tokens)
+    truncated_rewritten, rewritten_tokens = truncate_text(rewritten_text, max_tokens)
     
-    # Update the examples with the truncated texts
-    examples['prompt'] = truncated_prompts
-    examples['chosen'] = truncated_chosens
-    examples['rejected'] = truncated_rejecteds
+    # Constructing the user content with both original and rewritten texts, including token counts
+    user_content = f"Original_Text: {truncated_original} (Original tokens: {original_tokens}) , Rewritten_Text: {truncated_rewritten} (Rewritten tokens: {rewritten_tokens})"
+    
+    chat = [
+        { "role": "user", "content": task_description },
+        { "role": "assistant", "content": assistant_message },
+        { "role": "user", "content": user_content },
+    ]
 
-    return examples
+    return chat
+"""
 
-# Apply preprocessing to the 'train' split
-dataset.map(preprocess_function, batched=True)
+# Load a sentence transformer model for embedding calculation
+sentence_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+
+def evaluate_model_with_similarity(test_dataset, tokenizer, model, num_samples=10):
+    # Ensure the model is in evaluation mode
+    model.eval()
+    
+    # Move model to the appropriate device
+    #model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    
+    results = []
+
+    for i in range(num_samples):
+        # Extract a single test sample
+        test_sample = test_dataset[i]
+        
+        # Assuming 'test_sample' contains 'chosen' which we compare with the output
+        chosen_text = test_sample['chosen']
+        """
+        prompt = create_custom_prompt(
+            tokenizer,
+            test_sample['original_text'],
+            test_sample['rewritten_text']
+        )
+        """
+        inputs = tokenizer.encode(test_sample["prompt"], add_special_tokens=False, return_tensors="pt")
+        input_length = inputs.shape[1]
+
+        start_time = time()
+
+        outputs = model.generate(input_ids=inputs.to(model.device), max_new_tokens=150)
+        new_tokens = outputs[0, input_length:]
+        generated_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        
+        end_time = time()
+        time_taken = end_time - start_time
+
+        # Compute embeddings for both chosen and generated text
+        chosen_embedding = sentence_model.encode(chosen_text, convert_to_tensor=True)
+        generated_embedding = sentence_model.encode(generated_text, convert_to_tensor=True)
+
+        # Compute Cosine similarity
+        cosine_similarity = util.cos_sim(chosen_embedding, generated_embedding).item()
+        
+        #similarity_scores = cosine_similarity(prompt_embeddings, prompt_1_embeddings)
+        #similarity_scores = np.diag(similarity_scores)
+
+        results.append({
+            'prompt': test_sample["prompt"],
+            'chosen': chosen_text,
+            'output': generated_text,
+            'time_taken': time_taken,
+            'cosine_similarity': cosine_similarity
+        })
+    
+    return results
+
+# Example usage
+results = evaluate_model_with_similarity(dataset["train"], tokenizer, base_model, num_samples=5)
+
+for result in results:
+    #print("Prompt:", result['prompt'])
+    print("Chosen:", result['chosen'])
+    print("Output:", result['output'])
+    print("Time taken:", result['time_taken'], "seconds")
+    print("Cosine similarity:", result['cosine_similarity'], "\n")
 
 
 
@@ -151,7 +165,7 @@ dataset.map(preprocess_function, batched=True)
 lora_dropout=0.05
 lora_alpha=16
 lora_r=16
-learning_rate=5e-4 # 5e-4
+learning_rate=5e-5 # 5e-4
 batch_size = 4
 
 def create_peft_config(model):
@@ -162,7 +176,7 @@ def create_peft_config(model):
         lora_alpha=lora_alpha,
         r=lora_r,
         bias="none",
-        target_modules = ["q_proj", "k_proj", "v_proj"] #, "o_proj", "gate_proj"]
+        target_modules = ["q_proj", "k_proj", "v_proj"] #, "o_proj", "gate_proj"] #"up_proj", "down_proj"
     )
 
     model = prepare_model_for_kbit_training(model)
@@ -189,51 +203,19 @@ training_args = TrainingArguments(
     optim="paged_adamw_32bit",
 )
 
-from datasets import load_dataset
-
-dataset_file = "dpo_dataset.json"
-"""
- # Load the dataset
-#dataset = load_dataset("json", data_files="dpo_dataset.json", field="rows")
-#dataset = load_dataset("Anthropic/hh-rlhf")
-dataset = load_dataset("argilla/dpo-mix-7k")
-print(dataset)
-
-def construct_prompt(example):
-    # Extract the question and initial answer from the 'chosen' field (assuming it's similar for 'rejected')
-    question = example['chosen'][0]['content']
-    initial_answer = example['chosen'][1]['content']
-    
-    # Extract the completions from both 'chosen' and 'rejected' fields
-    chosen_completion = example['chosen'][1]['content']
-    rejected_completion = example['rejected'][1]['content']
-    
-    # Construct the prompt
-    prompt = f"Question and Initial Answer:\n{question}\n\nChosen Completion:\n{chosen_completion}\n\nRejected Completion:\n{rejected_completion}\n\n"
-    prompt += "Based on the initial answer, which completion is more accurate and relevant? Choose 'Chosen' or 'Rejected'."
-    
-    example['prompt'] = prompt
-    return example
-
-
-dataset = dataset.map(construct_prompt)
-print(dataset)
-"""
 
 trainer = DPOTrainer(
     model, # model base_model
     ref_model=None,
     args=training_args,
     train_dataset=dataset["train"], # test_dataset dataset
+    #test_dataset=dataset["test"],
     tokenizer=tokenizer,
     peft_config=lora_config,
     beta=0.1,
-    max_prompt_length=2048, #changed from 1024
-    max_length=1536,
+    #max_prompt_length=2048, #changed from 1024
+    #max_length=1536,
 )
-
-
-# Use this generator in your DataLoader, Sampler, or other components that require random operations
 
 
 print("Starting trainer...")
@@ -246,30 +228,10 @@ trainer.train()
 
 # seems that this can be ignored:
 # Could not estimate the number of tokens of the input, floating-point operations will not be computed
-
-output_dir = os.path.join(output_dir, "final_checkpoint")
+model_name = "gemma_2b_it"
+output_dir = os.path.join(output_dir, f"final_checkpoint_{model_name}")
 trainer.model.save_pretrained(output_dir)
 
-
-##Testing
-# Define the system message
-example = dataset["train"][0]
-input_text = example["prompt"]
-
-# Tokenize input text, ensuring to generate an attention mask this time
-inputs = tokenizer(input_text, return_tensors="pt", max_length=2000, truncation=True, padding=True)
-
-# For open-ended generation, setting pad_token_id explicitly if your model does not have one set
-if model.config.pad_token_id is None:
-    model.config.pad_token_id = base_model.config.eos_token_id
-
-# Generate output using the updated inputs
-outputs = model.generate(**inputs, max_length=2000, pad_token_id=model.config.pad_token_id)
-text = tokenizer.batch_decode(outputs)[0]
-
-# Output the model's generated text and the actual rewrite prompt for comparison
-actual_rewrite_prompt = example['chosen']
-print("Generated Prompt:", text)
-print("Actual Rewrite Prompt:", actual_rewrite_prompt)
+results = evaluate_model_with_similarity(dataset["train"], tokenizer, model, num_samples=5)
 
 
