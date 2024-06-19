@@ -7,6 +7,28 @@ This repository is dedicated to my participation in the "LLM Prompt Recovery Cha
 ### Why This Is Important
 Delving into the mechanics of prompt engineering allows us to better tailor AI behaviors in applications ranging from automated content generation to AI-driven interactive systems, thereby advancing the field of natural language processing.
 
+## Repository Structure
+
+- `data_generation/` - Contains scripts and notebooks for synthetic data generation.
+- `final_checkpoint_phi_2/` - Stores final performance Lora adapters for the Phi-2 model.
+- `final_checkpoint-1000/` - Contains training checkpoint weights.
+- `data_generation.ipynb` - Shows how training data was synthetically generated, highlighting scoring based on semantic similarity.
+- `dpo_main.ipynb` - Details the training and fine-tuning process using transformer models and quantization.
+- `requirements.txt` - Lists dependencies required to run the provided code.
+
+## Skills Developed and Career Benefits
+
+This project enhanced my capabilities in several key areas:
+
+- **Synthetic Data Generation**: Crafting datasets that mimic real-world data to train machine learning models.
+- **Semantic Analysis**: Utilizing advanced techniques to analyze and match the semantic fidelity of model outputs to human expectations.
+- **Fine-Tuning LLMs**: Adjusting and optimizing large language models to specific tasks and datasets to improve their performance and applicability.
+- **Machine Learning Pipelines**: Designing and deploying robust NLP pipelines using state-of-the-art tools like Hugging Face’s Transformers.
+- **Prompt Engineering**: Crafting prompts that effectively guide LLMs towards generating desired textual outputs.
+
+These skills are crucial for advancing in careers related to AI and machine learning, especially in roles focused on developing and deploying AI solutions that interact with human language.
+
+
 ### Start and Close Dates
 - **Start Date**: February 27, 2024
 - **Close Date**: April 17, 2024
@@ -28,24 +50,3 @@ Participants were provided with minimal initial data, necessitating the generati
 - **Labeling and Scoring**: Each pair of original and rewritten texts was then labeled with the appropriate prompt and scored for semantic similarity to ensure alignment with the expected transformations.
 
 The process required extensive use of various NLP tools and frameworks to simulate realistic LLM interactions and generate valid training data.
-
-## Repository Structure
-
-- `data_generation/` - Contains scripts and notebooks for synthetic data generation.
-- `final_checkpoint_phi_2/` - Stores final performance Lora adapters for the Phi-2 model.
-- `final_checkpoint-1000/` - Contains training checkpoint weights.
-- `data_generation.ipynb` - Shows how training data was synthetically generated, highlighting scoring based on semantic similarity.
-- `dpo_main.ipynb` - Details the training and fine-tuning process using transformer models and quantization.
-- `requirements.txt` - Lists dependencies required to run the provided code.
-
-## Skills Developed and Career Benefits
-
-This project enhanced my capabilities in several key areas:
-
-- **Synthetic Data Generation**: Crafting datasets that mimic real-world data to train machine learning models.
-- **Semantic Analysis**: Utilizing advanced techniques to analyze and match the semantic fidelity of model outputs to human expectations.
-- **Fine-Tuning LLMs**: Adjusting and optimizing large language models to specific tasks and datasets to improve their performance and applicability.
-- **Machine Learning Pipelines**: Designing and deploying robust NLP pipelines using state-of-the-art tools like Hugging Face’s Transformers.
-- **Prompt Engineering**: Crafting prompts that effectively guide LLMs towards generating desired textual outputs.
-
-These skills are crucial for advancing in careers related to AI and machine learning, especially in roles focused on developing and deploying AI solutions that interact with human language.
