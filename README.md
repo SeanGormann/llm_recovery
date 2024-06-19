@@ -1,5 +1,7 @@
 # LLM Prompt Recovery Challenge - Kaggle Competition
 
+![Gemma Logo](gemma_logo.jpeg)
+
 ## Overview
 
 This repository is dedicated to my participation in the "LLM Prompt Recovery Challenge", a Kaggle competition that focuses on uncovering the prompts used by Google's Gemma LLM to transform texts. The primary objective is to develop techniques that can accurately predict the prompts used in various transformations, enhancing our understanding of how LLMs interpret and process inputs.
